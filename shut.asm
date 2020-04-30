@@ -22,7 +22,9 @@ BACKSP  equ "_"             ; Yup. This is what the backspace key generates.
 MAXBUFF equ 220             ; Size of input text buffer (if buffer is maxed out,
                             ; we'll automatically add a CR to the end, so total
                             ; size might be as much as MAXBUFF + 1)
-SHUT    equ "_"             ; Symbol to print when a door number is "shut"
+SHUT    equ $2F             ; Value to represent "shut" in the DOORS array
+                            ; When converted to ASCII in the same way as the 
+                            ; other digits, this will display as an underscore
 
 
         ; Zero-page variables
@@ -74,7 +76,7 @@ BUFFER  ds 1    ; Beginning of text buffer (ensure that this is defined last!)
         
         ; Initialize game with all "doors" open
 NEWGAME ldx #8
-        lda #"9"
+        lda #9
 .initlp sta DOORS,x
         sec
         sbc #1
@@ -89,6 +91,8 @@ PRINGAM jsr NEWLINE
         jsr NEWLINE
         ldx #0
 .prgmlp lda DOORS,x
+        clc
+        adc #"0"        ; Convert integer representation to ASCII
         jsr ECHO
         inx
         cpx #9
@@ -322,7 +326,12 @@ PRINERR SUBROUTINE  ; Displays a standard input error message
 TXT_WELCOME
         .byte $0D
         .byte $0D
-        dc "SHUT THE BOX - BY JEFF JETTON"
+        dc "     SHUT THE BOX -- BY JEFF JETTON"
+        .byte $0D
+        .byte $0D
+        dc "           (WORK IN PROGRESS)"
+        .byte $0D
+        .byte $0D
         .byte $0D
         .byte $0D
         dc "INSTRUCTIONS (Y/N)? "
