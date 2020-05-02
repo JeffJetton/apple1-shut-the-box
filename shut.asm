@@ -1,7 +1,7 @@
 ; "Shut the Box" for the Apple I
 
 ; Jeff Jetton
-; April 2020
+; April-May 2020
 
 ; Written for the dasm assembler, but should assemble under others
 ; with a few tweaks here and there.
@@ -19,7 +19,7 @@ ECHO    equ $FFEF           ; WozMon routine to display register A char
 WOZMON  equ $FF1F           ; Entry point back to WozMonitor (It's own GETLINE)
 CR      equ $0D             ; Carriage return ASCII value
 BACKSP  equ "_"             ; Yup. This is what the backspace key generates.
-MAXBUFF equ 220             ; Size of input text buffer (if buffer is maxed out,
+MAXBUFF equ 200             ; Size of input text buffer (if buffer is maxed out,
                             ; we'll automatically add a CR to the end, so total
                             ; size might be as much as MAXBUFF + 1)
 SHUT    equ $2F             ; Value to represent "shut" in the DOORS array
@@ -34,13 +34,15 @@ SHUT    equ $2F             ; Value to represent "shut" in the DOORS array
 
 DOORS   ds 9    ; The state of the 9 "doors"
 CHOICES ds 9    ; Keeps track of unique door numbers picked by the player
+                ; Also used as a temp holding area for calculating win status
 CYCOFF  ds 1    ; A constantly-cycled (during key polling) offset into the
-                ; die results table.  Creates essentially-random die rolls
+                ; die results table.  Creates "random" die rolls (sort of)
                 ; without actually futzing around with a PRNG.
 CURROLL ds 1    ; Current turn's dice roll result (two numbers in BCD)
 ROLLTOT ds 1    ; The combined value of the dice roll
 CHOITOT ds 1    ; Total of door number(s) chosen by the player on a turn
 SCORE   ds 1    ; Running score of remaining door values
+NUMOPEN ds 1    ; Running count of open doors
 TXTLO   ds 1    ; Low-order byte of address of beginning of text to print
 TXTHI   ds 1    ; High-order byte of text
 BUFFER  ds 1    ; Beginning of text buffer (ensure that this is defined last!)
@@ -77,6 +79,7 @@ BUFFER  ds 1    ; Beginning of text buffer (ensure that this is defined last!)
         ; Initialize game with all "doors" open
 NEWGAME ldx #8
         lda #9
+        sta NUMOPEN
 .initlp sta DOORS,x
         sec
         sbc #1
@@ -91,18 +94,16 @@ PRINGAM jsr NEWLINE
         jsr NEWLINE
         ldx #0
 .prgmlp lda DOORS,x
-        clc
-        adc #"0"        ; Convert integer representation to ASCII
-        jsr ECHO
+        jsr ECHOASC     ; Display the integer as ASCII
         inx
         cpx #9
         bne .prgmlp
         
-        ; Check to see if we've won
-        lda SCORE
+        ; Check to see if we've won (no doors open--i.e. all shut)
+        lda NUMOPEN
         bne GETDICE
         
-        ; TODO: Finish this bit. Display totally shut doors, etc.
+        ; TODO: Finish this bit. Show a proper message.
         jsr NEWLINE
         jsr NEWLINE
         lda #":"
@@ -125,14 +126,13 @@ GETDICE ; Get and print dice roll (and also calculate dice total)
         sta CURROLL         ; Store as raw BCD for now...
         
         ; TODO: Use some wozmon routines for some of this?
+        ; TODO: Only one die if open total <= 6?
         lsr                 ; Isolate first die number
         lsr
         lsr
         lsr
         sta ROLLTOT         ; Save as first part of total
-        clc                 ; Convert to ASCII value
-        adc #"0"
-        jsr ECHO            ; Display first die text
+        jsr ECHOASC         ; Display first die text
         lda #<TXT_AND       ; Print " & "
         sta TXTLO
         lda #>TXT_AND
@@ -140,21 +140,68 @@ GETDICE ; Get and print dice roll (and also calculate dice total)
         jsr PRINTXT
         lda CURROLL         ; Isolate second die value
         and #$0F
-        tax                 ; Remember it in X for a bit...
+        tax                 ; Remember it in X for a bit... TODO: Really?
         clc                 ; Add die value to total
         adc ROLLTOT
         sta ROLLTOT
         txa                 ; Bring the die value back
-        adc #"0"            ; Convert to ASCII and display
-        jsr ECHO
+        jsr ECHOASC         ; Display second die value
         jsr NEWLINE
         jsr NEWLINE
-
-
+        
         
         
 CHKDONE ; Check to see if there even is any valid move or if game over
         ; TODO:  ???
+        ; TODO: Better backwards?
+        ; TODO: Better if we just operate out of DOORS directly?
+        ; First, load remaining doors into an array (without gaps)
+        ldx #0
+        ldy #0
+.loadlp lda DOORS,x
+        cmp #SHUT
+        beq .skipld
+        sta CHOICES,y
+        iny
+.skipld inx
+        cpx #9
+        bne .loadlp
+        ; Work backwards through array. Y is our "current top" index
+        ; X will be the "moving left from top" index. A is working total.
+        dey             ; Undo that last iny above
+.setx   tya
+        tax             ; x = y
+        lda ROLLTOT
+.trysub cmp CHOICES,x   ; Can current door be subtracted from working total?
+        bmi .skpsub     ; Don't subtract if not
+        sec
+        sbc CHOICES,x
+        beq GETMOVE     ; Down to zero? Valid move exists--game not over yet!
+.skpsub dex             ; Bump index to the left
+        bpl .trysub     ; If not past the end of array, try another subtraction
+        dey             ; Bump the top to the left
+        bpl .setx       ; Top not past end? Reset X & A and try again.
+        
+        ; Algoright failed on 1  4  789
+        ; with roll of 1 & 5
+        
+        ; TODO: fix this to make a proper game over
+        jsr NEWLINE
+        jsr NEWLINE
+        lda #"%"
+        jsr ECHO
+        jsr ECHO
+        jsr ECHO
+        jsr ECHO
+        jsr NEWLINE
+        jsr NEWLINE
+        lda SCORE
+        jsr PRBYTE
+        jsr NEWLINE
+        
+        
+        
+        jmp WOZMON
         
         
         ; Get player's door choice(s)
@@ -200,13 +247,13 @@ CHKMOVE ; Is the move valid? (Didn't pick an already-shut door)
         jmp GETMOVE     ;   ...and have user re-enter move
 .nextch dex
         bpl .choilp
+        
         ; Did the user pick numbers that have same total as dice roll?
         lda ROLLTOT
         cmp CHOITOT
         beq SHUTEM
         jsr PRINERR     ; Totals don't match. Show unhelpful message.
         jmp GETMOVE     ;   ...and try again
-        
         
 SHUTEM  ; Go back through and set chosen doors to "shut"
         ldx #8
@@ -216,6 +263,7 @@ SHUTEM  ; Go back through and set chosen doors to "shut"
         sec             ;   by the value
         sbc CHOICES,x   ;   of the shut
         sta SCORE       ;   door
+        dec NUMOPEN     ; Update count of open doors
         lda #SHUT       ; Mark the door as being shut
         sta DOORS,x
 .nextdr dex
@@ -227,7 +275,7 @@ SHUTEM  ; Go back through and set chosen doors to "shut"
 
 
         ; Game over...
-        lda #<TXT_REPLAY    ; Prompt for playing another round
+REPLAY  lda #<TXT_REPLAY    ; Prompt for playing another round
         sta TXTLO
         lda #>TXT_REPLAY
         sta TXTHI
@@ -243,7 +291,8 @@ ENDGAME lda #<TXT_BYE
         jsr PRINTXT
         jmp WOZMON          ; Return to WozMonitor
 
-        
+
+
 ; Subroutines   ***************************************************************
 ; TODO: Implement ESCape
 ; TODO: Use woz method to limit buffer size if bytes still need to be shaved
@@ -292,10 +341,15 @@ PRINTXT SUBROUTINE  ; Put string pointer in TXTLO & TXTHI before calling
 
 
 ; TODO: put a TWOLINE routine here to replace two newlines in a row
-NEWLINE SUBROUTINE  ; Just print out a newline (destroys A)
+NEWLINE ; Just print out a newline (destroys A)
         lda #$0D
         jmp ECHO
 
+
+ECHOASC ; Convert integer in A to ASCII equivalent before calling ECHO
+        clc
+        adc #"0"
+        jmp ECHO
 
 
 GETYN   SUBROUTINE  ; Gets a valid Y or N response from user. Sets Z flag on Y.
@@ -312,7 +366,7 @@ GETYN   SUBROUTINE  ; Gets a valid Y or N response from user. Sets Z flag on Y.
 
 
 
-PRINERR SUBROUTINE  ; Displays a standard input error message
+PRINERR ; Displays a standard input error message
         lda #<TXT_BADINPUT
         sta TXTLO
         lda #>TXT_BADINPUT
