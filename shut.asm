@@ -6,8 +6,6 @@
 ; Written for the dasm assembler, but should assemble under others
 ; with a few tweaks here and there.
 
-; 1_3______  with a single-die roll of 4???
-
 
         processor 6502
         
@@ -19,6 +17,8 @@ PRBYTE  equ $FFDC           ; WozMon routine to diaplay register A in hex
 ECHO    equ $FFEF           ; WozMon routine to display register A char
 WOZMON  equ $FF1F           ; Entry point back to WozMonitor (It's own GETLINE)
 CR      equ $0D             ; Carriage return ASCII value
+ESC     equ $1B             ; Escape key ASCII value
+BKSLSH  equ $5C             ; Backslash
 BACKSP  equ "_"             ; Yup. This is what the backspace key generates.
 WIDTH   equ 40              ; Screen width, in characters
 SHUT    equ $2F             ; Value to represent "shut" in the DOORS array
@@ -131,8 +131,6 @@ GETDICE ; Get and print dice roll (and also calculate dice total)
         ldx CYCOFF          ; Get current dice value
         lda DICE,x
         sta CURROLL         ; Store as raw BCD for now...
-        
-        ; TODO: Use some wozmon routines for some of this?
         lsr                 ; Isolate first die number
         lsr
         lsr
@@ -190,37 +188,57 @@ GAMEOVER    ; No more moves. Display "game over" message
         ; Score display is different if only one digit left
         lda NUMOPEN
         cmp #1
-        beq .onedig
+        beq .onelft
         
         ; Standard score message
-        jsr ECHOINT             ; Print num digits
+        jsr ECHOINT             ; Print num digits remaining
         lda #<TXT_SCOREMULT     ; Print score "label" text
         sta TXTLO
         lda #>TXT_SCOREMULT
         sta TXTHI
         jsr PRTEXT
         lda SCORE               ; Tack score on end
+        cmp #10                 ; Is first BCD digit zero?
+        bcc .onedgt
         jsr PRBYTE
+        beq REPLAY              ; Z always set after PRBYTE (saves 1 byte)
+.onedgt jsr ECHOINT             ; Don't display leading zero
         jmp REPLAY
         
         ; Score message if one digit left
-.onedig lda #<TXT_SCOREONE
+.onelft lda #<TXT_SCOREONE
         sta TXTLO
         lda #>TXT_SCOREONE
         sta TXTHI
-        jsr PRTEXT
-        jmp REPLAY
+        jsr PRTEXT     
         
+        ; Prompt for playing another round
+REPLAY  lda #<TXT_REPLAY
+        sta TXTLO
+        lda #>TXT_REPLAY
+        sta TXTHI
+        jsr PRTEXT2
+        jsr GETYN           ; Get valid Y or N input
+        bne GOODBYE
+        jmp NEWGAME
+
+GOODBYE lda #<TXT_BYE
+        sta TXTLO
+        lda #>TXT_BYE
+        sta TXTHI
+        jsr PRTEXT2
+        jmp WOZMON          ; Return to WozMonitor        
         
+
 GETMOVE ldx #8          ; Zero out the bytes that track unique
         lda #0          ;   door number choices for this turn
 .clrlp  sta CHOICES,x
         dex
         bpl .clrlp
-        jsr GETLINE
         
-        ; Process the input line.
-        ; Note that, after GETLINE, X points to one past end of buffer text
+        jsr GETLINE     ; Get line of user text
+        
+        ; Process text. (After GETLINE, X points to one past end of buffer text)
 .chkcr  dex             ; Move x one char to the left
         bmi CHKMOVE     ; If past beginning of 128-char buffer, we're done
         lda BUFFER,x    ; Otherwise, put char in A
@@ -277,67 +295,57 @@ SHUTEM  ; Go back through and set chosen doors to "shut"
         bpl .doorlp
         
         ; That's one turn down...
-        
-        ; TEMP fake a win...
-        ; lda #0
-        ; sta NUMOPEN
-        
         jmp PRINGAM
 
 
-
-        ; Prompt for playing another round
-REPLAY  lda #<TXT_REPLAY
-        sta TXTLO
-        lda #>TXT_REPLAY
-        sta TXTHI
-        jsr PRTEXT2
-        jsr GETYN           ; Get valid Y or N input
-        bne GOODBYE
-        jmp NEWGAME
-        
-GOODBYE lda #<TXT_BYE       ; TODO: Save about 19 bytes by getting rid of this
-        sta TXTLO
-        lda #>TXT_BYE
-        sta TXTHI
-        jsr PRTEXT2
-        jmp WOZMON          ; Return to WozMonitor
-
-
-
 ; Subroutines   ***************************************************************
-; TODO: Implement ESCape
-GETLINE SUBROUTINE  ; Read input into the buffer (also cycles dice offset)
-        ldx #0          ; Register X is our current buffer offset
+
+; Input handling. Similar to WozMon's GETLINE, but doesn't do a CR first and
+; also cycles through dice roll offsets while polling for a key press.
+SUBROUTINE
+.chkbs  cmp #BACKSP     ; Did they hit a backspace?
+        beq .bspc
+    
+        cmp #ESC        ; Did they hit the escape key?
+        beq .escap
         
-        ; Dice cycling...
+        inx             ; i++
+        bpl .getkey     ; As long as no buffer overflow, get next char
+        
+        ; Buffer overflow and ESC action are nearly the same
+.escap  lda #BKSLSH
+        jsr ECHO
+.overfl lda #CR
+        jsr ECHO
+
+GETLINE ; <-- ENTER HERE!
+        ldx #1          ; Register X is our current buffer offset
+.bspc   dex
+        bmi .overfl     ; If backspaced too far, escape w/o printing slash  
+        
+        ; Get key and store in A. Cycle dice offset pointer while polling.
 .getkey dec CYCOFF      ; Bump the die results offset down one byte
-        bmi .rstoff     ; If we've gone past zero, reset back to the end
+        bmi .reset      ; If we've gone past zero, reset back to the end
         bit 0           ; Waste three cycles so branch timing matches
         jmp .chkpia     ; 3 cycles
-.rstoff lda #35         ; 2 cycles (plus extra cycle from the taken branch)
+.reset  lda #35         ; 2 cycles (plus extra cycle from the taken branch)
         sta CYCOFF      ; 3 cycles
-        ; ...end of dice cycling
-        
 .chkpia lda KBDCR       ; Check PIA for keyboard input
         bpl .getkey     ; Loop if A is "positive" (bit 7 low... no key ready)
         lda KBD         ; Get the keyboard character
         and #%01111111  ; Clear bit 7, which is always set for some reason
-        jsr ECHO        ; Always echo what the user just typed
         
-.chkbs  cmp #BACKSP     ; Did they hit backspace?
-        bne .bufstr
-        dex             ; Move buffer pointer back
-        bmi GETLINE     ; Reset the whole shebang if we backspaced all the way
-        jmp .getkey     ; Otherwise, just get next key input
-             
-.bufstr sta BUFFER,x    ; Store key in the buffer
-        cmp #CR         ; Did they hit "return"?
-        beq .done
+        ; Store and display the key
+        STA BUFFER,X
+        jsr ECHO
+        
+        ; Did they type a CR?
+        cmp #CR
+        bne .chkbs
+        rts
+; End of input line handler
 
-.next   inx             ; Next buffer offset please
-        bpl .getkey     ; Wozmon-style 128-character limit. Return if full.
-.done   rts
+
 
 
 PRTEXT2 jsr TWOLINE     ; Call this to put two CRs before what you're printing
@@ -358,12 +366,13 @@ TWOLINE lda #CR
 
 
 ECHOINT ; Convert integer in A to ASCII equivalent before calling ECHO
+        ; Similar to WozMon's PRHEX but also works to print the "_"
         clc
         adc #"0"
         jmp ECHO
 
 
-GETYN   SUBROUTINE  ; Gets a valid Y or N response from user. Sets Z flag on Y.
+GETYN   SUBROUTINE  ; Gets a valid Y or N response from user. Sets Z flag if "Y"
         jsr GETLINE
         lda BUFFER
         cmp #"N"
@@ -403,11 +412,11 @@ TXT_WELCOME
         dc "INSTRUCTIONS (Y/N)? "
         .byte $00
 
-TXT_INSTRUCT  ; TODO: remove periods if needed!
+TXT_INSTRUCT
         dc "ENTER ONE OR MORE AVAILABLE DIGITS TO"
         .byte $0D
         dc "REMOVE THEM.  DIGIT(S) PICKED MUST HAVE "
-        dc "SAME TOTAL AS DICE."
+        dc "SAME TOTAL AS DICE"
         .byte $0D
         .byte $0D
         dc "ONLY 1 DIE ROLLED IF REMAINING DIGITS"
@@ -431,7 +440,7 @@ TXT_AND
         .byte $00        
 
 TXT_BADINPUT
-        dc "INVALID CHOICE.  TRY AGAIN: "
+        dc "SORRY, TRY AGAIN: "
         .byte $00
         
 TXT_WINNER
@@ -447,8 +456,8 @@ TXT_WINNER
         byte $00
 
 TXT_GAMEOVER
-        dc "NO MORE MOVES"
         .byte $0D
+        dc "NO MORE MOVES"
         .byte $0D
         .byte $0D
         .byte $00
@@ -461,7 +470,7 @@ TXT_SCOREONE
         dc "OOOH... SO CLOSE!"
         .byte $0D
         .byte $0D
-        dc "JUST ONE LEFT!"
+        dc "JUST ONE DIGIT LEFT!"
         .byte $00            
         
 TXT_REPLAY
@@ -471,17 +480,14 @@ TXT_REPLAY
 
 TXT_BYE
         dc "BYE!"
-        .byte $0D
-        .byte $0D
         .byte $00
 
-        ; TODO if I can code a 16-bit prng in less than 36 bytes...
-        ;      or create a table in memory in less than 36 bytes
-        ; Or mix up digit two better
-DICE    hex 11 12 13 14 15 16
-        hex 41 42 43 44 45 46
-        hex 31 32 33 34 35 36
-        hex 41 42 43 44 45 46
-        hex 51 52 53 54 55 56
-        hex 21 22 23 24 25 26
-        hex 61 62 63 64 65 66
+        ; This takes up a couple dozen more bytes than implememting a PRNG, but
+        ; it's fast and ensures that all outcomes are precisely equally likely
+DICE    hex 11 22 33 44 55 66
+        hex 12 23 34 45 56 61
+        hex 13 24 35 46 51 62
+        hex 14 25 36 41 52 63
+        hex 15 26 31 42 53 64
+        hex 16 21 32 43 54 65
+
