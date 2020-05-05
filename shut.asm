@@ -448,7 +448,6 @@ TXT_WINNER
         .byte $0D
         .byte $0D
         .byte $0D
-        .byte $0D
         dc "          YOU'VE SHUT THE BOX!"
         .byte $0D
         .byte $0D
@@ -480,6 +479,7 @@ TXT_REPLAY
 
 TXT_BYE
         dc "BYE!"
+        dc $0D
         .byte $00
 
         ; This takes up a couple dozen more bytes than implememting a PRNG, but
