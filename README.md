@@ -1,10 +1,13 @@
-# Apple 1 "Shut the Box" (Work in Progress)
+# Apple 1 "Shut the Box"
     
 A version of the traditional pub game [Shut the Box](https://en.wikipedia.org/wiki/Shut_the_Box), written in assembly for the Apple 1 and its various clones/emulators.
 
+Exacly 1K in size.
 
-    
-## Files in the Repo (Eventually!):
+<img src="https://github.com/JeffJetton/apple1-shut-the-box/blob/master/img/screenshot.png" width="400">
+
+
+## Files in the Repo:
 
 * **shut.asm**
     * The 6502 assembly language source code
