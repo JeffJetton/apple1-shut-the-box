@@ -15,7 +15,7 @@ KBDCR   equ $D011           ; Keyboard control: Indicator that a new input
                             ;                   character is ready
 PRBYTE  equ $FFDC           ; WozMon routine to diaplay register A in hex
 ECHO    equ $FFEF           ; WozMon routine to display register A char
-WOZMON  equ $FF1F           ; Entry point back to WozMonitor (It's own GETLINE)
+WOZMON  equ $FF1F           ; Entry point back to WozMonitor (Its own GETLINE)
 CR      equ $0D             ; Carriage return ASCII value
 ESC     equ $1B             ; Escape key ASCII value
 BKSLSH  equ $5C             ; Backslash
@@ -24,7 +24,7 @@ WIDTH   equ 40              ; Screen width, in characters
 SHUT    equ $2F             ; Value to represent "shut" in the DOORS array
                             ; When converted to ASCII in the same way as the 
                             ; other digits, this will display as an underscore.
-                            ; (Also makes the game over check efficient)
+                            ; (Also makes the game-over check efficient)
 
 
         ; Zero-page variables
@@ -36,8 +36,8 @@ DOORS   ds 9    ; The state of the 9 "doors"
 CHOICES ds 9    ; Keeps track of unique door numbers picked by the player
 CYCOFF  ds 1    ; A constantly-cycled (during key polling) offset into the
                 ; die results table.  Creates "random" die rolls (sort of)
-                ; without actually futzing around with a PRNG.
-CURROLL ds 1    ; Current turn's dice roll result (two numbers in BCD)
+                ; without actually futzing around with an LFSR-type PRNG.
+CURROLL ds 1    ; Current turn's dice roll result (two digits in BCD)
 ROLLTOT ds 1    ; The combined value of the dice roll
 CHOITOT ds 1    ; Total of door number(s) chosen by the player on a turn
 SCORE   ds 1    ; Running score of remaining door values
